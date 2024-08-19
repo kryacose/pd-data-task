@@ -7,15 +7,17 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Binder
 import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.util.Log
+import com.asu.pddata.CSVRow
+import com.asu.pddata.SensorData
 import com.asu.pddata.constants.Constants
 import java.io.File
 import java.io.FileWriter
 import java.io.IOException
-import java.time.LocalDateTime
 import java.util.Locale
 
 class ForegroundService : Service(), SensorEventListener {
@@ -26,33 +28,25 @@ class ForegroundService : Service(), SensorEventListener {
     private var mGyroSensor: Sensor? = null
     private var mHeartRateSensor: Sensor? = null
 
-    private var accXValue: Float = 0F
-    private var accYValue: Float = 0F
-    private var accZValue: Float = 0F
-    private var angularSpeedX: Float = 0F
-    private var angularSpeedY: Float = 0F
-    private var angularSpeedZ: Float = 0F
-    private var heartRate: Float = 0F
 
-    private var accXValues: MutableList<Float> = arrayListOf()
-    private var accYValues: MutableList<Float> = arrayListOf()
-    private var accZValues: MutableList<Float> = arrayListOf()
-    private var angularSpeedXValues: MutableList<Float> = arrayListOf()
-    private var angularSpeedYValues: MutableList<Float> = arrayListOf()
-    private var angularSpeedZValues: MutableList<Float> = arrayListOf()
-    private var heartRateValues: MutableList<Float> = arrayListOf()
+    private var sensorData: SensorData = SensorData()
+    private var csvData: ArrayList<CSVRow> = arrayListOf()
+    private var tookMedication: Boolean = false
 
-    private val DATA_COLLECTION_INTERVAL = 10 // 1 second
-    private val ClOUD_SYNC_INTERVAL = 10000 // 10 second,
-    private val headers: List<String> = listOf("Acc X", "Acc Y", "Acc Z", "Angular X",
-        "Angular Y", "Angular Z", "Heart Rate")
 
     private val dataCollectionHandler = Handler()
     private val cloudSyncHandler = Handler()
     private var lastSynced = System.currentTimeMillis()
 
-    override fun onBind(p0: Intent?): IBinder? {
-        return null
+    private var mBinder: Binder = LocalBinder()
+
+
+    override fun onBind(intent: Intent): IBinder {
+        return mBinder
+    }
+
+    inner class LocalBinder : Binder() {
+        fun getServerInstance(): ForegroundService = this@ForegroundService
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -102,15 +96,15 @@ class ForegroundService : Service(), SensorEventListener {
             return
         }
         if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-            accXValue = event.values[0]
-            accYValue = event.values[1]
-            accZValue = event.values[2]
+            sensorData.accXValue = event.values[0]
+            sensorData.accYValue = event.values[1]
+            sensorData.accZValue = event.values[2]
         } else if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
-            angularSpeedX = event.values[0]
-            angularSpeedY = event.values[1]
-            angularSpeedZ = event.values[2]
+            sensorData.angularSpeedX = event.values[0]
+            sensorData.angularSpeedY = event.values[1]
+            sensorData.angularSpeedZ = event.values[2]
         } else if (event.sensor.type == Sensor.TYPE_HEART_RATE) {
-            heartRate = event.values[0]
+            sensorData.heartRate = event.values[0]
         }
     }
 
@@ -119,38 +113,48 @@ class ForegroundService : Service(), SensorEventListener {
     }
 
 
-    private fun saveDataToCSV(headers: List<String>, data: List<List<Float>>, fileName: String): Boolean {
-        if (isExternalStorageWritable()) {
-            val csvFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), fileName)
+    private fun saveDataToCSV(fileName: String): Boolean {
 
-            try {
-                Log.v("Cloud", "Saving file to $fileName")
-                val fileWriter = FileWriter(csvFile)
+        if(!isExternalStorageWritable())
+            return false
 
-                fileWriter.append(headers.joinToString(","))
-                fileWriter.append("\n")
-
-                if (data.isNotEmpty()) {
-                    for (i in 0 until data.get(0).size) {
-                        var row: MutableList<String> = mutableListOf()
-                        for (sensor in data) {
-                            row.add(String.format(Locale.US, "%.2f", sensor.get(i)))
-                        }
-                        fileWriter.append(row.joinToString(","))
-                        fileWriter.append("\n")
-                    }
-                } else {
-                    Log.i("data", "List is empty")
-                }
-
-                fileWriter.close()
-            } catch (e: IOException) {
-                e.printStackTrace()
-                return false
-            }
-            return true
+        if(csvData.isEmpty()) {
+            Log.i("data", "List is empty")
+            return false
         }
-        return false
+
+        val csvFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), fileName)
+
+        try {
+            Log.v("Cloud", "Saving file to $fileName")
+            val fileWriter = FileWriter(csvFile)
+
+            fileWriter.append(CSVRow.getHeaders().joinToString(","))
+            fileWriter.append("\n")
+
+            for (i in 0 until csvData.size) {
+                val row: MutableList<String> = mutableListOf()
+                row.add(csvData[i].timestamp.toString())
+                row.add(String.format(Locale.US, "%.2f", csvData[i].sensorData.accXValue))
+                row.add(String.format(Locale.US, "%.2f", csvData[i].sensorData.accYValue))
+                row.add(String.format(Locale.US, "%.2f", csvData[i].sensorData.accZValue))
+                row.add(String.format(Locale.US, "%.2f", csvData[i].sensorData.angularSpeedX))
+                row.add(String.format(Locale.US, "%.2f", csvData[i].sensorData.angularSpeedY))
+                row.add(String.format(Locale.US, "%.2f", csvData[i].sensorData.angularSpeedZ))
+                row.add(String.format(Locale.US, "%.2f", csvData[i].sensorData.heartRate))
+                row.add(String.format(Locale.US, "%d", if(csvData[i].medication) 1 else 0))
+
+                fileWriter.append(row.joinToString(","))
+                fileWriter.append("\n")
+            }
+
+
+            fileWriter.close()
+        } catch (e: IOException) {
+            e.printStackTrace()
+            return false
+        }
+        return true
     }
 
     private fun isExternalStorageWritable(): Boolean {
@@ -162,26 +166,17 @@ class ForegroundService : Service(), SensorEventListener {
         override fun run() {
             collectData()
 
-            dataCollectionHandler.postDelayed(this, DATA_COLLECTION_INTERVAL.toLong())
+            dataCollectionHandler.postDelayed(this, Constants.DATA_COLLECTION_INTERVAL.toLong())
         }
     }
 
     private val cloudSyncRunnable = object : Runnable {
         override fun run() {
-            val data: List<List<Float>> = listOf(accXValues, accYValues, accZValues,
-                angularSpeedXValues, angularSpeedYValues, angularSpeedZValues, heartRateValues)
             val currentSync = System.currentTimeMillis()
-            if (saveDataToCSV(headers, data, "data-$lastSynced-$currentSync")) {
-                accXValues.clear()
-                accYValues.clear()
-                accZValues.clear()
-                angularSpeedXValues.clear()
-                angularSpeedYValues.clear()
-                angularSpeedZValues.clear()
-                heartRateValues.clear()
+            if (saveDataToCSV("data-${Constants.USER_ID}-$lastSynced-$currentSync")) {
                 lastSynced = currentSync
             }
-            cloudSyncHandler.postDelayed(this, ClOUD_SYNC_INTERVAL.toLong())
+            cloudSyncHandler.postDelayed(this, Constants.CLOUD_SYNC_INTERVAL.toLong())
         }
     }
 
@@ -196,14 +191,24 @@ class ForegroundService : Service(), SensorEventListener {
     }
 
     fun collectData() {
-        Log.v("Collect", "Collecting data")
-        accXValues.add(accXValue)
-        accYValues.add(accYValue)
-        accZValues.add(accZValue)
-        angularSpeedXValues.add(angularSpeedX)
-        angularSpeedYValues.add(angularSpeedY)
-        angularSpeedZValues.add(angularSpeedZ)
-        heartRateValues.add(heartRate)
+        csvData.add(CSVRow(System.currentTimeMillis(), sensorData, getTookMedication()))
+        Log.v("Collect", "Collecting data: ${csvData.last()}")
+        //clear collected sensor data
+        sensorData = SensorData()
     }
 
+    fun setTookMedication() {
+
+        tookMedication = true
+    }
+    private fun getTookMedication(): Boolean {
+        if(tookMedication) {
+            tookMedication = false
+            return true
+        }
+        return false
+    }
+
+
 }
+
