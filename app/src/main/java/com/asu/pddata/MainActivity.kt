@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.IBinder
+import android.util.Log
 import android.widget.Button
 import com.asu.pddata.constants.Constants
 import com.asu.pddata.databinding.ActivityMainBinding
@@ -20,6 +21,7 @@ class MainActivity : Activity() {
     private lateinit var button: Button
     private lateinit var foregroundService: ForegroundService
     private lateinit var serviceConnection : ServiceConnection
+    private var backend : Backend = Backend()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,8 +51,10 @@ class MainActivity : Activity() {
         button.setOnClickListener {
             foregroundService.setTookMedication()
         }
-    }
 
+        backend.getUserDetails("TestUser1")
+//        backend.uploadSensorData("")
+    }
 
     private fun createNotificationChannel() {
 

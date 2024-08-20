@@ -12,6 +12,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.util.Log
+import com.asu.pddata.Backend
 import com.asu.pddata.CSVRow
 import com.asu.pddata.SensorData
 import com.asu.pddata.constants.Constants
@@ -37,6 +38,7 @@ class ForegroundService : Service(), SensorEventListener {
     private val dataCollectionHandler = Handler()
     private val cloudSyncHandler = Handler()
     private var lastSynced = System.currentTimeMillis()
+    private var backend: Backend = Backend()
 
     private var mBinder: Binder = LocalBinder()
 
@@ -147,8 +149,7 @@ class ForegroundService : Service(), SensorEventListener {
                 fileWriter.append(row.joinToString(","))
                 fileWriter.append("\n")
             }
-
-
+            csvData.clear()
             fileWriter.close()
         } catch (e: IOException) {
             e.printStackTrace()
@@ -173,8 +174,13 @@ class ForegroundService : Service(), SensorEventListener {
     private val cloudSyncRunnable = object : Runnable {
         override fun run() {
             val currentSync = System.currentTimeMillis()
-            if (saveDataToCSV("data-${Constants.USER_ID}-$lastSynced-$currentSync")) {
+            val fileName = "data-${Constants.USER_ID}-$lastSynced-$currentSync"
+            if (saveDataToCSV(fileName)) {
                 lastSynced = currentSync
+                backend.uploadSensorData(fileName)
+                File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), fileName).delete()
+                Log.v("FILES", Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).list()?.size.toString())
+
             }
             cloudSyncHandler.postDelayed(this, Constants.CLOUD_SYNC_INTERVAL.toLong())
         }
@@ -191,7 +197,7 @@ class ForegroundService : Service(), SensorEventListener {
     }
 
     fun collectData() {
-        csvData.add(CSVRow(System.currentTimeMillis(), sensorData, getTookMedication()))
+        csvData.add(CSVRow(System.currentTimeMillis()/1000, sensorData, getTookMedication()))
         Log.v("Collect", "Collecting data: ${csvData.last()}")
         //clear collected sensor data
         sensorData = SensorData()
